@@ -8,19 +8,18 @@ Lean 4 proof search using LLM.
 
 ## Usage and Example
 
-To use LeanSearch, you need to have build and traced a lean 4 repo with lean_dojo.
-
 [Look at the funsearch project for command, options and environment file](https://github.com/kitft/funsearch)
 
-However, the current lean_dojo implementation requires you to use the exact same theorem statement as in the locally traced Mathlib4.
+To use LeanSearch, you need to have built and traced a lean 4 repositary with lean_dojo, and use the exact same theorem statement as in the locally traced Lean repositary.
 
-Also, you need to update the sandbox initialization in sandbox.py to setup lean_dojo with the theorem needed. See lean_dojo interative documents for the setup.
+As a result, in addition to change the input sepc file, you also need to update the sandbox initialization in sandbox.py to setup lean_dojo with the theorem needed. See [lean_dojo document](https://github.com/lean-dojo/LeanDojo/blob/main/scripts/demo-lean4.ipynb) for the setup.
 
 An example command is
 
 ```console
 python ./leansearch/__main__.py runasync ./examples/Pi_eq_sum_univ.lean 10 --sandbox ExternalProcessSandbox --model mistralai/mistral-small-24b-instruct-2501 --evaluators 10 --samplers 10 --islands 5 --duration 60 --tag lean_test --envfile .env
 ```
+As of now, the --@funsearch.run theorem, and the argument after spec file, are both needed but without real usage. The sandbox must be ExternalProcessSandbox. The backup modules are not functional. Also, only a limited number of tactics are supported.
 
 
 ## Acknowledgments
