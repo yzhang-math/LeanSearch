@@ -7,10 +7,15 @@ Lean 4 proof search using LLM.
 2. lean_dojo
 
 ## Usage and Example
+
 To use LeanSearch, you need to have build and traced a lean 4 repo with lean_dojo.
+
 [Look at the funsearch project for command, options and environment file](https://github.com/kitft/funsearch)
+
 However, the current lean_dojo implementation requires you to use the exact same theorem statement as in the locally traced Mathlib4.
+
 Also, you need to update the sandbox initialization in sandbox.py to setup lean_dojo with the theorem needed. See lean_dojo interative documents for the setup.
+
 An example command is
 
 ```console
