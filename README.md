@@ -19,7 +19,7 @@ An example command is
 ```console
 python ./leansearch/__main__.py runasync ./examples/Pi_eq_sum_univ.lean 10 --sandbox ExternalProcessSandbox --model mistralai/mistral-small-24b-instruct-2501 --evaluators 10 --samplers 10 --islands 5 --duration 60 --tag lean_test --envfile .env
 ```
-As of now, the --@funsearch.run theorem, and the argument after spec file, are both needed but without real usage. The sandbox must be ExternalProcessSandbox. The backup modules are not functional. Also, only a limited number of tactics are supported.
+As of now, the --@funsearch.run theorem, and the argument after spec file, are both needed but without real usage. The sandbox must be ExternalProcessSandbox. The backup modules are functional but don't record everything yet. Also, only a limited number of tactics are supported.
 
 
 ## Acknowledgments
