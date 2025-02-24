@@ -82,13 +82,22 @@ class ExternalProcessSandbox(DummySandbox):
     self.theorem = None
     self.theorem_path = None
     self.theorem_name = None
-    self.repo = lean_dojo.LeanGitRepo(
-      "https://github.com/leanprover-community/mathlib4",
-      "29dcec074de168ac2bf835a77ef68bbe069194c5"
-      )
-    self.theorem_path = theorem_path
-    self.theorem_name = theorem_name
-    self.theorem = lean_dojo.Theorem(self.repo, theorem_path, theorem_name)
+    # self.repo = lean_dojo.LeanGitRepo(
+    #   "https://github.com/leanprover-community/mathlib4",
+    #   "29dcec074de168ac2bf835a77ef68bbe069194c5"
+    #   )
+    self.repo = lean_dojo.LeanGitRepo.from_path("/home/paul/Desktop/ML_experiments/lean4-example_0")
+        #print(self.repo)
+        #traced_repo = lean_dojo.trace(self.repo)
+    self.theorem_path = "Lean4Example.lean"
+    self.theorem_name = "amc12a_2015_p10"
+    self.theorem = lean_dojo.Theorem(self.repo, self.theorem_path, self.theorem_name)
+    
+    #self.theorem_path = theorem_path
+    #self.theorem_path = "miniF2F-lean4/MiniF2F/Valid.lean"
+    #self.theorem_name = theorem_name
+    #self.theorem_name = "amc12a_2015_p10"
+    self.theorem = lean_dojo.Theorem(self.repo, self.theorem_path, self.theorem_name)
     logging.info(f"Finished initializing sandbox {self.id}")
 
   def _exec(self, call_data_path: pathlib.Path, input_path: pathlib.Path, error_file_path: pathlib.Path):

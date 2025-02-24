@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 import httpx
 import aiohttp
-import logging_stats
+from funsearch import logging_stats
 
 
 def get_model_provider(model_name):
@@ -282,7 +282,7 @@ class LLMModel:
                 end = time.time()
                 logging.debug(f"prompt:end:{self.model}:{self.id}:{self.counter}:{attempt}:{end-start:.3f}")
                 if chat_response is not None:
-                    logging.debug(f"prompt:success:{self.model}:{self.id}:{self.counter}:{attempt}:{end-begin:.3f}",)
+                    logging.info(f"prompt:success:{self.model}:{self.id}:{self.counter}:{attempt}:{end-begin:.3f}",)
                     self.counter += 1
                     return chat_response,usage_stats
                 logging.warning(f"prompt:error-empty:{self.model}:{self.id}:{self.counter}:{attempt}:{end-start:.3f}")
