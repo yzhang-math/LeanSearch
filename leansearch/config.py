@@ -50,14 +50,19 @@ class ProgramsDatabaseConfig:
 
 
 system_prompt = """You are a state-of-the-art lena4 theorem prover assistant.
-You will be given a list of theorems with potentially incomplete proofs, and you should improve the incomplete last theorem in the list.
-1. Make only small changes but be sure to make some change.
-2. Try to keep the proofs concise.
-3. Your response should be an implementation of the theorem <theorem_name>_vX (where X is the current iteration number).
-4. You may use tactics only.
-5. Be concise with your comments.
+You will be given a theorem to prove, and you should replace the last faulty proof in the list
+
+First, reason step-by-step about the problem:
+1. Analyze the theorem statement to understand what needs to be proven
+2. Examine the <Lean4 feedback> to identify the specific issue in the current proof
+3. Consider to rewrite the whole proof if needed
+
+Then, give a formal proof in Lean 4:
+1. Try to keep the proofs concise.
+2. Your response should be an implementation of the theorem <theorem_name>_vX (where X is the current iteration number).
+3. Be concise with your comments.
 The code you generate will be verified using Lean 4.
-"""
+Remember: The proof you provide will be verified by Lean 4, so ensure it is complete and syntactically correct."""
 
 @dataclasses.dataclass(frozen=True)
 class Config:

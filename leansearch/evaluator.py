@@ -79,59 +79,6 @@ DISALLOWED = { '__import__(', 'breakpoint(', 'compile(', 'open(', 'dir(', 'eval(
 #     'vars', 'zip'
 # }
 
-# class FunctionChecker(ast.NodeVisitor):
-#     def __init__(self):
-#         self.is_safe = True
-#         self.vars = []
-
-#     def visit_Import(self, node):
-#         for alias in node.names:
-#             if alias.name not in ALLOWED_FUNCTIONS:
-#                 self.is_safe = False
-#             self.generic_visit(node)
-
-#     def visit_ImportFrom(self, node):
-#         if node.module not in ALLOWED_FUNCTIONS:
-#             self.is_safe = False
-#         self.generic_visit(node)
-    
-#     def visit_Assign(self, node):
-#         for target in node.targets:
-#             # Check if the target is a name
-#             if isinstance(target, ast.Name):
-#                 self.vars.append(target.id)
-#             # Check if the target is a tuple or list
-#             elif isinstance(target, (ast.Tuple, ast.List)):
-#                 for element in target.elts:
-#                     if isinstance(element, ast.Name):
-#                         self.vars.append(element.id)
-
-#     def visit_arguments(self, node):
-#         for arg in node.args:
-#             if isinstance(arg, ast.arg):
-#                 if arg.arg not in self.vars:
-#                     self.vars.append(arg.arg)
-#         self.generic_visit(node)
-
-#     def visit_Call(self, node):
-#         # # Check for disallowed built-in function calls
-#         # if isinstance(node.func, ast.Name):
-#         #     if node.func.id in DISALLOWED_BUILTINS:
-#         #         self.is_safe = False
-#         # # Check if function calls are from allowed modules
-#         if isinstance(node.func, ast.Attribute):
-#             # if node.func.value.id not in ALLOWED_FUNCTIONS:
-#             #     self.is_safe = False
-#             func_value = ast.unparse(node.func.value)
-#             func_value = func_value.split('.')[0]
-#             if '(' in func_value:
-#                 func_value = func_value.split('(')[0]
-#             if '[' in func_value:
-#                 func_value = func_value.split('[')[0]
-#             if func_value not in ALLOWED_FUNCTIONS and func_value not in self.vars and func_value not in ALLOWED_BUILTINS:
-#                 print(func_value)
-#                 self.is_safe = False
-#         self.generic_visit(node)
 
 # def is_function_safe(func:code_manipulation.Function)->bool:
 #     #function_code = inspect.getsource(func)
@@ -190,7 +137,7 @@ class _FunctionLineVisitor(ast.NodeVisitor):
 
 def _find_method_implementation(generated_code: str) -> Tuple[str, str]:
     matches = list(METHOD_MATCHER.finditer(generated_code))  # Use finditer() instead
-    logging.info(f"_find_method_implementation found {len(matches)} matches")
+    #logging.info(f"_find_method_implementation found {len(matches)} matches")
     if not matches:
         return "", ""
     
@@ -259,38 +206,40 @@ def _sample_to_program(
     if not implementation:
         logging.warning(f"No implementation: Failed to parse theorem: {sample}")
         return None, None
-    logging.info(f"_sample_to_program: Parsing theorem: {implementation}")
+    #logging.info(f"_sample_to_program: Parsing theorem: {implementation}")
     # Create a Function object to represent the theorem
     try:
         # Extract theorem components using regex
-        if "--@funsearch.run" not in implementation or True:  # Only skip run theorems
-          # Now match the theorem details with more precise proof capture
-          theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
-          theorem\s+                             # Theorem keyword
-          (\w+?)                                  # Base name
-          (?:_v(\d+))?                           # Optional version number
-          \s*
-          ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
-          \s*:\s*                                # Statement separator
-          ((?:(?!:=).)*?)                        # Statement
-          \s*:=\s*(?:by\s*)?                     # Proof separator
-          ([\s\S]*)
-                    '''
-          theorem_match = re.search(theorem_pattern, implementation, re.DOTALL | re.VERBOSE)
-          if theorem_match:
-            name, version, args, return_type, proof = theorem_match.groups()
-            logging.info(f"sample_to_program theorem_match:\nname:{name}, version:{version}, args:{args}, return_type:{return_type}, proof:{proof}")
-            theorem_name = f"{name}_v{version}" if version else name
-            proof = proof.strip()
-                        
-            function = code_manipulation.Function(
-                            name=theorem_name,
-                            args=args.strip() if args else "",
-                            return_type=return_type.strip(),
-                            body=proof,
-                            declaretype="theorem",
-                            fullstring=implementation
-                        )
+        # if "--@funsearch.run" not in implementation or True:  # Only skip run theorems
+        #   # Now match the theorem details with more precise proof capture
+        #   theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
+        #   theorem\s+                             # Theorem keyword
+        #   (\w+?)                                  # Base name
+        #   (?:_v(\d+))?                           # Optional version number
+        #   \s*
+        #   ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
+        #   \s*:\s*                                # Statement separator
+        #   ((?:(?!:=).)*?)                        # Statement
+        #   \s*(:=\s*(?:by\s*)?)                  # Proof separator
+        #   ([\s\S]*)
+        #   '''
+        #   theorem_match = re.search(theorem_pattern, implementation, re.DOTALL | re.VERBOSE)
+        #   if theorem_match:
+        #     name, version, args, return_type, proof_sep,proof = theorem_match.groups()
+        #     theorem_name = f"{name}_v{version}" if version else name
+        #     statement_block = implementation[:theorem_match.end(5)]
+        #     function = code_manipulation.Function(
+        #                     name=theorem_name,
+        #                     args=args.strip() if args else "",
+        #                     return_type=return_type.strip(),
+        #                     body=proof,
+        #                     declaretype="theorem",
+        #                     fullstring=implementation,
+        #                     statement_block= statement_block
+        #                 )
+        #     logging.info(f"sample_to_program find proof: \n{proof}")
+        function = function_match(implementation)
+        #logging.info(f"sample_to_program function_match find proof: \n{function.body}")
         
 
         # Create complete program by combining template and new theorem
@@ -309,6 +258,40 @@ def _sample_to_program(
     except Exception as e:
         logging.warning(f"Failed to parse theorem: {e}")
         return None, None
+
+
+def function_match(implementation: str) -> code_manipulation.Function:
+  theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
+  theorem\s+                             # Theorem keyword
+  (\w+?)                                  # Base name
+  (?:_v(\d+))?                           # Optional version number
+  \s*
+  ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
+  \s*:\s*                                # Statement separator
+  ((?:(?!:=).)*?)                        # Statement
+  \s*(:=\s*(?:by\s*)?)                  # Proof separator
+  ([\s\S]*)
+  '''
+  theorem_match = re.search(theorem_pattern, implementation, re.DOTALL | re.VERBOSE)
+  if theorem_match:
+    name, version, args, return_type, proof_sep,proof = theorem_match.groups()
+            #logging.info(f"sample_to_program theorem_match:\n name:{name}, version:{version}, args:{args}, return_type:{return_type}, proof:\n{proof}")
+    theorem_name = f"{name}_v{version}" if version else name
+            #proof = proof.strip()
+    statement_block = implementation[:theorem_match.end(5)]
+    function = code_manipulation.Function(
+       name=theorem_name,
+       args=args.strip() if args else "",
+       return_type=return_type.strip(),
+       body= '  ' + proof,
+       declaretype="theorem",
+       fullstring=implementation,
+       statement_block= statement_block
+       )
+    return function
+  else:
+    return None
+   
 
 
 def _calls_ancestor(program: str, function_to_evolve: str) -> bool:
@@ -407,7 +390,11 @@ class Evaluator:
       #print("Putting in queue inside evaluator")
       #self._database.register_program(new_function, island_id, scores_per_test)
       #db_queue.put((new_function, island_id, scores_per_test))
-      logging.debug(f"eval:success {model} {scores_per_test}")
+      tempstring = new_function.statement_block.strip() +lean_message + '\n' 
+      if time.time() % 1 < 0.1:
+        logging.info(f"eval:success {lean_message} \nat tactic {scores_per_test[current_input]+1} ")
+      new_function.fullstring = tempstring
+      #logging.debug(f"eval:success {model} {scores_per_test}")
       usage_stats.eval_state = 'success'
       usage_stats.scores_per_test = scores_per_test
       self._log(usage_stats)

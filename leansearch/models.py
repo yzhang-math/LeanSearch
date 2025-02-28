@@ -13,7 +13,7 @@ from datetime import datetime
 from pathlib import Path
 import httpx
 import aiohttp
-from funsearch import logging_stats
+import logging_stats
 
 
 def get_model_provider(model_name):

@@ -1,5 +1,5 @@
 import logging
-
+import time
 import ast
 import os
 import pathlib
@@ -140,10 +140,11 @@ class ExternalProcessSandbox(DummySandbox):
     self.call_count += 1
 
     retcode = 0
+    score = 0
 
     if False:
       try:
-        tactics = self._parse_lean_tactics(function_to_run)
+        tactics = parse_lean_tactics(function_to_run)
         logging.info(f"Evaluating Tactics: {tactics}")
 
         return 0, True, "Skip Lean Dojo"
@@ -161,26 +162,36 @@ class ExternalProcessSandbox(DummySandbox):
     # Return score based on verification success
       return 100, True, "Proof completed successfully"  # Or some other scoring scheme
     
+    feedbackmsg = ''
     try:
       with lean_dojo.Dojo(entry=self.theorem, timeout=timeout_seconds) as (dojo, state):
-        tactics = self._parse_lean_tactics(function_to_run)
-        logging.info(f"Sandbox: {self.id} Evaluating Tactics: {tactics}")
+        #logging.info(f"Sandbox: {self.id} Parsing tactics from proof:\n {function_to_run}")
+        tactics = parse_lean_tactics(function_to_run)
+        #logging.info(f"Sandbox: {self.id} Evaluating Tactics: {tactics}")
 
         # Return 0, True, "Skip Lean Dojo"
         # Run each tactic
+        ran_tactics = ''
         for tactic in tactics:
-            logging.info(f"Sandbox: {self.id} Running tactic: {tactic}")
-            result = dojo.run_tac(state, tactic)
+            #logging.info(f"Sandbox: {self.id} Running tactic: \n{tactic}")
+            ran_tactics += '\n' + tactic
+            result = dojo.run_tac(state, tactic.strip())
             if isinstance(result, lean_dojo.LeanError):
-                logging.info(f"Sandbox: {self.id} Tactic error")
-                return 1, True, f"Tactic error: {result.error}"
+                #logging.info(f"Sandbox: {self.id} Tactic error\n {result.error} at tactic {tactic}")
+
+                return score, True, ran_tactics + f"\n\n<Lean4 feedback> last tactic error: \n{result.error} \n"
             elif isinstance(result, lean_dojo.ProofGivenUp):
-                logging.info(f"Sandbox: {self.id} Proof given up")
-                return 1, True, "Proof given up"
+                #logging.info(f"Sandbox: {self.id} Proof given up")
+                return score, True, ran_tactics+"\n<Lean4 feedback> Proof contains sorry"
             elif isinstance(result, lean_dojo.ProofFinished):
                 logging.info(f"Sandbox: {self.id} Proof completed")
-                return 100, True, "Proof completed"
+                return 100, True, ran_tactics+"\n<Lean4 feedback> Proof completed"
+            if "sorry" not in tactic:
+              score += 1
             state = result
+            
+        feedbackmsg = ran_tactics + "\n<Lean4 feedback> Proof unfinished without error\n" + result.pp
+            
     except Exception as e:
       logging.error(f"Sandbox: {self.id} Error executing tactics {e}")
       retcode = 1
@@ -190,10 +201,10 @@ class ExternalProcessSandbox(DummySandbox):
         with open(error_file, "r") as f:
             outerr = f.read()
         logging.error(f"Sandbox: {self.id} Leandojo failed")
-        return outerr, False, None
+        return -1, False, None
 
     # Return score based on verification success
-    return 10, True, "Unknown status"  # Or some other scoring scheme
+    return score, True, feedbackmsg  # Or some other scoring scheme
 
   @staticmethod
   def _save_diagnostics(program: str, output_path: pathlib.Path):
@@ -202,25 +213,25 @@ class ExternalProcessSandbox(DummySandbox):
     with open(filepath, "w+") as f:
       f.write(program)
 
-  def _validate_tactic(self, tactic: str) -> str:
+def validate_tactic(tactic: str) -> str:
     if not tactic:
       return None
-    valid_tactics = ['sorry', 'rw', 'simp', 'intro', 'exact', 'apply', 'split', 'cases', 'induction', 'destruct', 'revert', 'have', 'ext']
+    valid_tactics = ['sorry', 'rw', 'simp', 'intro', 'exact', 'apply', 'split', 'cases', 'induction', 'destruct', 'revert', 'have', 'ext', 'calc']
     cleaned_str = tactic.strip().replace('[', ' [')
     startingword = cleaned_str.split(' ')[0]
     if startingword not in valid_tactics:
-      return None
+      pass
     if "--" in tactic:
-      return tactic.split('--')[0].strip()
+      return tactic.split('--')[0]
     else:
       return tactic
 
-  def _parse_lean_tactics(self, proof: str) -> list[str]:
+def parse_lean_tactics1(self, proof: str) -> list[str]:
     """Parse a Lean proof into individual tactics."""
     # Remove 'by' if present
     if proof.startswith('by'):
         proof = proof[2:].strip()
-    logging.info(f"Parsing tactics from proof: {proof}")
+    logging.info(f"Parsing tactics from proof:\n {proof}")
     # Split into tactics (this is a simple split, might need to be more sophisticated)
     maybetactics = [t.strip() for t in proof.split('\n') if t.strip()]
     
@@ -230,6 +241,67 @@ class ExternalProcessSandbox(DummySandbox):
       if nexttactic:
         tactics.append(nexttactic)
     return tactics
+  
+def parse_lean_tactics(proof: str) -> list[str]:
+    """Parse a Lean proof into individual tactics, handling multi-line indented blocks and removing comments."""
+    # Remove 'by' if present
+    #logging.info(f"Parsing tactics from proof:\n{proof}")
+    if proof.startswith('by'):
+        proof = proof[2:]
+    
+    lines = proof.split('\n')
+    tactics = []
+    current_tactic = ""
+    current_indent = -1
+    
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue  # Skip empty lines
+        
+        # Remove comments from the line
+        if "--" in line:
+            line = line.split("--")[0].rstrip()
+            if not line.strip():
+                continue  # Skip lines that were only comments
+        
+        # Calculate line's indentation level
+        indent_level = len(line) - len(line.lstrip())
+
+        if current_indent == -1:
+           current_indent = indent_level
+        
+        if indent_level <= current_indent:
+            # If we have a stored tactic, validate and save it first
+            if current_tactic:
+                # validated_tactic = validate_tactic(current_tactic.strip())
+                # if validated_tactic:
+                #     tactics.append(' '*indent_level + validated_tactic)
+                tactics.append(current_tactic)
+            
+            # Start a new tactic
+            validated_tactic = validate_tactic(line)
+            if validated_tactic.strip():
+              current_tactic = validated_tactic
+              current_indent = indent_level
+        else:
+            # This is a continuation of the current tactic (indented block)
+            validated_tactic = validate_tactic(line)
+            if validated_tactic.strip():
+                current_tactic += "\n" + validated_tactic
+
+    
+    # Don't forget to process the last tactic
+    if current_tactic:
+        validated_tactic = validate_tactic(current_tactic.strip())
+        if validated_tactic:
+            tactics.append(validated_tactic)
+    if False and time.time() % 3 < 0.1:
+        logging.info(f'Parsing proof: \n{proof}')
+        logging.info(f"Parsed tactics:")
+        for t in tactics:
+            logging.info(f"  {t}")
+    return tactics
+
 
 class ContainerSandbox(ExternalProcessSandbox):
   """Basic sandbox that runs unsafe code in Podman or Docker container.

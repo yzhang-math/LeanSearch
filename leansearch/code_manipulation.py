@@ -43,6 +43,8 @@ class Function:
   docstring: str | None = None
   declaretype: str = "theorem"
   fullstring: str = ''
+  statement_block: str = ''
+  tactics: list[str] = None
 
   def __str__(self) -> str:
     #print("\n\ndocs\n", self.docstring)
@@ -241,9 +243,43 @@ class ProgramVisitor(ast.NodeVisitor):
     return Program(preface=self._preface, functions=self._functions)
 
 
+def function_match(implementation: str) -> Function:
+  theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
+  theorem\s+                             # Theorem keyword
+  (\w+?)                                  # Base name
+  (?:_v(\d+))?                           # Optional version number
+  \s*
+  ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
+  \s*:\s*                                # Statement separator
+  ((?:(?!:=).)*?)                        # Statement
+  \s*(:=\s*(?:by\s*)?)                  # Proof separator
+  ([\s\S]*)
+  '''
+  theorem_match = re.search(theorem_pattern, implementation, re.DOTALL | re.VERBOSE)
+  if theorem_match:
+    name, version, args, return_type, proof_sep,proof = theorem_match.groups()
+            #logging.info(f"sample_to_program theorem_match:\n name:{name}, version:{version}, args:{args}, return_type:{return_type}, proof:\n{proof}")
+    theorem_name = f"{name}_v{version}" if version else name
+            #proof = proof.strip()
+    statement_block = implementation[:theorem_match.end(5)]
+    function = Function(
+       name=theorem_name,
+       args=args.strip() if args else "",
+       return_type=return_type.strip(),
+       body= '  ' + proof,
+       declaretype="theorem",
+       fullstring=implementation,
+       statement_block= statement_block
+       )
+    return function
+  else:
+    return None
+   
+
+
 def text_to_program(text: str) -> Program:
     """Converts text into a Program object."""
-    logging.info(f"text_to_program: text:\n{text}")
+    # logging.info(f"text_to_program: text:\n{text}")
     # Check if it's Lean code
     is_lean = True
     if is_lean:
@@ -253,13 +289,17 @@ def text_to_program(text: str) -> Program:
         pattern = r'((?:--@funsearch\.(?:evolve|run)\s*\n)?\s*theorem.*?)(?=\s*(?:--@funsearch|theorem|\Z))'
         
         matches = list(re.finditer(pattern, text, re.DOTALL))
-        logging.info(f"text_to_program find {len(matches)} theorems")
+        #logging.info(f"text_to_program find {len(matches)} theorems")
         if matches:
             for match in matches:
                 theorem_text = match.group(1).strip()
-                logging.info(f"text_to_program theorem_text:\n{theorem_text}")
+                # logging.info(f"text_to_program theorem_text:\n{theorem_text}")
                 # Process both evolve theorems and initial template theorems
-                if "--@funsearch.run" not in theorem_text or True:  # Only skip run theorems
+                tempfun = function_match(theorem_text)
+                if tempfun:
+                    program.functions.append(tempfun)
+                
+                if False: # Use unified matching above
                     # Now match the theorem details with more precise proof capture
                     theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
                     theorem\s+                             # Theorem keyword
@@ -269,15 +309,16 @@ def text_to_program(text: str) -> Program:
                     ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
                     \s*:\s*                                # Statement separator
                     ((?:(?!:=).)*?)                        # Statement
-                    \s*:=\s*(?:by\s*)?                     # Proof separator
+                    \s*(:=\s*(?:by\s*)?)                    # Proof separator
                     ([\s\S]*)
                     '''
                     theorem_match = re.search(theorem_pattern, theorem_text, re.DOTALL | re.VERBOSE)
                     if theorem_match:
-                        name, version, args, return_type, proof = theorem_match.groups()
-                        logging.info(f"text_to_program theorem_match:\nname:{name}, version:{version}, args:{args}, return_type:{return_type}, proof:{proof}")
+                        name, version, args, return_type, proof_sep, proof = theorem_match.groups()
+                        #logging.info(f"text_to_program theorem_match:\n name:{name}, version:{version}, args:{args}, return_type:{return_type}, proof:{proof}")
                         theorem_name = f"{name}_v{version}" if version else name
                         proof = proof.strip()
+                        statement_block = theorem_text[:theorem_match.end(5)]
                         
                         program.functions.append(Function(
                             name=theorem_name,
@@ -285,9 +326,12 @@ def text_to_program(text: str) -> Program:
                             return_type=return_type.strip(),
                             body=proof,
                             declaretype="theorem",
-                            fullstring=theorem_text
+                            fullstring=theorem_text,
+                            statement_block = statement_block
                         ))
-                        #logging.info(f"text_to_program detected evolve theorem:\n{theorem_text}")
+                        
+                        #logging.info(f"text_to_program detected statement:\n{statement_block}")
+                        #logging.info(f"text_to_program detected proof:\n{proof}")
         
         if program.functions:
             return program
