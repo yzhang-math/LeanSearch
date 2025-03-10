@@ -14,6 +14,9 @@ from pathlib import Path
 import httpx
 import aiohttp
 import logging_stats
+import re
+#import vllm
+#import torch
 
 
 def get_model_provider(model_name):
@@ -31,6 +34,8 @@ def get_model_provider(model_name):
         return "google"
     elif "llama" in model_name.lower() or "deepseek" in model_name.lower() or "qwen" in model_name.lower() or "mixtral" in model_name.lower():
         return "deepinfra"
+    elif "vllm" in model_name.lower():
+        return "vllm"
     else:
         raise ValueError(f"Unsupported model name: {model_name}. Have a look in __main__.py and models.py to add support for this model.")
 
@@ -48,7 +53,8 @@ class LLMModel:
         log_path=None,
         system_prompt="Improve the incomplete last function in the list.",## See config.py for the default system prompt
         api_call_timeout=120,
-        api_call_retries=10
+        api_call_retries=10,
+        informal_statement = None,
     ):
         self.id = str(shortuuid.uuid()) if id is None else str(id)
         
@@ -63,7 +69,7 @@ class LLMModel:
         if keynum > 0:
             keyname += str(keynum)
         self.key = os.environ.get(keyname)
-        if not self.key and self.provider != "mock_model":
+        if not self.key and self.provider not in ["mock_model", "vllm"]:
             raise ValueError(f"{keyname} environment variable is not set")
         if self.provider == "mistral":
             self.client = Mistral(api_key=self.key)
@@ -79,6 +85,10 @@ class LLMModel:
         elif self.provider == "openrouter":
             self.client = openai.AsyncOpenAI(api_key=self.key,base_url="https://openrouter.ai/api/v1")
             self.data_request = openai.AsyncOpenAI(api_key=self.key,base_url="https://openrouter.ai/api/v1/generation")
+        elif self.provider == "vllm":
+            self.vllm_host = "http://localhost:8000"
+            self.temperature = 1.0
+        
         self.model = model_name
         self.top_p = top_p
         self.temperature = temperature
@@ -88,6 +98,8 @@ class LLMModel:
         self.log_stats = True
         self.log_detailed_stats = False
         self.system_prompt = system_prompt
+        if informal_statement:
+            self.system_prompt +=  informal_statement
         logging.info(f"Created {self.provider} {self.model} sampler {self.id} using {keyname}")
         #logging.info(f"Ensure temperature defaults are correct for this model??")
 
@@ -244,6 +256,48 @@ class LLMModel:
             chat_response = None if response is None else response.text
             if hasattr(response, 'status_code') and response.status_code == 429:
                 raise httpx.HTTPStatusError("Rate limit exceeded: 429", request=None, response=response)
+        elif self.provider == "vllm":
+            async with aiohttp.ClientSession() as session:
+                payload = {
+                        "prompt": prompt_text,
+                        "temperature": self.temperature,
+                        "top_p": self.top_p,
+                        "max_tokens": 3072,
+                        "system_prompt": self.system_prompt,
+                    }
+                    
+                async with session.post(f"{self.vllm_host}/generate", json=payload) as response:
+                    if response.status != 200:
+                        logging.error(f"vLLM request failed with status {response.status}: {await response.text()}")
+                        raise httpx.HTTPStatusError(f"vLLM request failed: {response.status}", request=None, response=response)
+                        
+                    result = await response.json()
+                    chat_response = result.get("text", "")
+
+                    code_block = re.search(r'```lean4\n(.*?)\n```', chat_response, re.DOTALL)
+                    if code_block:
+                        chat_response = code_block.group(1)
+
+
+                        
+                # Estimate token counts
+                # This is approximate - for more accurate counts, vLLM would need to return token counts
+                    prompt_tokens = len(prompt_text) // 4
+                    completion_tokens = len(chat_response) // 4
+                        
+                    usage_stats = logging_stats.UsageStats(
+                            id=str(shortuuid.uuid()),
+                            model=self.model,
+                            provider=self.provider,
+                            total_tokens=prompt_tokens + completion_tokens,
+                            tokens_prompt=prompt_tokens,
+                            tokens_completion=completion_tokens,
+                            instance_id=self.id,
+                            prompt=prompt_text,
+                            response=chat_response
+                        )
+                        
+
         else:
             return None
 

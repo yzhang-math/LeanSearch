@@ -50,6 +50,14 @@ def parse_input(filename_or_data: str):
         data = [f(v) for v in data]
     return data
 
+def find_informal_prefix(path, name:str):
+    with open(path, 'r') as file:
+        for line in file:
+            data = json.loads(line)
+            data_name = data.get("name",str())
+            if data_name == name:
+                return data.get("informal_prefix", str())
+
 
 @click.group()
 @click.pass_context
@@ -150,7 +158,7 @@ def plotscores(name, output_path = "./data"):
 @click.option('--samplers', default=1, type=click.INT, help='Number of samplers')
 @click.option('--evaluators', default=10, type=click.INT, help='Number of evaluators')
 @click.option('--islands', default=10, type=click.INT, help='Number of islands')
-@click.option('--reset', default=600, type=click.INT, help='Reset period in seconds')
+@click.option('--reset', default=1000, type=click.INT, help='Reset period in seconds')
 @click.option('--duration', default=3600, type=click.INT, help='Duration in seconds')
 @click.option('--temperature', default="1.0", type=str, help='LLM temperature or comma-separated list of temperatures')
 @click.option('--team', default=None, type=str, help='wandb team name')
@@ -240,13 +248,32 @@ def runAsync(spec_file, inputs, model, output_path, load_backup, iterations, san
     model_list = sum([model_counts[i]*[model_list[i]] for i in range(len(model_list))],[])
     keynum_list = sum([model_counts[i]*[model_keys[i]] for i in range(len(model_keys))],[])
 
+    parsed_inputs = parse_input(inputs)
+    informal_prefix = find_informal_prefix("/home/paul/Desktop/ML_experiments/LeanSearch-dev/examples/minif2f.jsonl", parsed_inputs[1])
+
+    if informal_prefix:
+        logging.info(f"informal prefix: \n{informal_prefix}")
+        informal_prefix = '\n' + informal_prefix
+
     logging.info(f"keynum list: {keynum_list}")
-    lm = [sampler.LLM(conf.samples_per_prompt, models.LLMModel(model_name=model_list[i], top_p=conf.top_p,
+    lm = [sampler.LLM(conf.samples_per_prompt, models.LLMModel(model_name=model_list[i], top_p=conf.top_p, informal_statement = informal_prefix,
         temperature=temperature_list[i], keynum=keynum_list[i],id = i,log_path=log_path,system_prompt=conf.system_prompt), log_path=log_path,api_call_timeout=conf.api_call_timeout,api_call_max_retries=conf.api_call_max_retries,ratelimit_backoff=conf.ratelimit_backoff) for i in range(len(model_list))]
 
     specification = spec_file.read()
     function_to_evolve, function_to_run = core._extract_function_names(specification)
     template = code_manipulation.text_to_program(specification)
+
+    theorem_declare = template.functions[0].statement_block
+
+    if 'theorem' in theorem_declare:
+        theorem_insert = 'theorem' + theorem_declare.split('theorem')[1]
+        theorem_declare = theorem_insert[0:min(10, len(theorem_declare))]
+
+    logging.info(f'LLM statement_block {theorem_declare}')
+    for ii in lm:
+        ii.theorem_declare = theorem_declare
+        ii.theorem_insert = theorem_insert
+        
 
     database = programs_database.ProgramsDatabase(
         conf.programs_database, template, function_to_evolve, identifier=timestamp)
@@ -271,11 +298,12 @@ def runAsync(spec_file, inputs, model, output_path, load_backup, iterations, san
             else:
                 raise FileNotFoundError(f"Could not find backup file matching '{load_backup}' in {backup_dir}")
 
-    parsed_inputs = parse_input(inputs)
+    
+    logging.info(f"Inputs: {parsed_inputs}")
     sandbox_class = next(c for c in SANDBOX_TYPES if c.__name__ == sandbox)
 
-    portable_config = async_agents.PortableSystemConfig(log_path=log_path, output_path=output_path,sandbox_class=sandbox_class, parsed_inputs=parsed_inputs,
-                                                    template=template, function_to_evolve=function_to_evolve, function_to_run=function_to_run, 
+    portable_config = async_agents.PortableSystemConfig(log_path=log_path, output_path=output_path,sandbox_class=sandbox_class, parsed_inputs = range(1),
+                                                    template=template, function_to_evolve=function_to_evolve, function_to_run=function_to_run, theorem_setup= parsed_inputs,
                                                     lm=lm,model_identifier=model_identifier,problem_name=problem_name,timestamp=timestamp,name_for_saving=name_for_saving,problem_identifier=problem_identifier,tag=tag)
 
     async def initiate_search():

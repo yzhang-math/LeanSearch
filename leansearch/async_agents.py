@@ -40,6 +40,7 @@ class PortableSystemConfig:
   name_for_saving: str
   problem_identifier: str
   tag: str
+  theorem_setup: list
 
 class AsyncProgramsDatabase(programs_database.ProgramsDatabase):
     def __init__(self, database: programs_database.ProgramsDatabase):
@@ -69,7 +70,7 @@ class AsyncProgramsDatabase(programs_database.ProgramsDatabase):
 def evaluator_process(eval_queue: Queue, result_queue: Queue, config: config_lib.Config, portable_config: PortableSystemConfig, id: int):
     evaluator_instance = evaluator.Evaluator(
         AsyncProgramsDatabase(config.programs_database),
-        portable_config.sandbox_class(base_path=portable_config.log_path, id=id),
+        portable_config.sandbox_class(base_path=portable_config.log_path, id=id, theorem_setup = portable_config.theorem_setup),
         portable_config.template,
         portable_config.function_to_evolve,
         portable_config.function_to_run,
@@ -125,9 +126,18 @@ async def sampler_worker(sampler: sampler.Sampler, eval_queue: multiprocessing.Q
     max_sleep = 60    # Maximum sleep time in seconds
     backoff_factor = 1.5  # Exponential backoff multiplier
     current_sleep = base_sleep
-    
+    #logging.info(f"Sampler {sampler.sampler_id} started")
     while True:
-        prompt = await database.get_prompt()
+        #logging.info(f"Async sampler {sampler.sampler_id} working")
+        try:
+            prompt = await asyncio.wait_for( database.get_prompt(), timeout = 5.0)
+        except asyncio.TimeoutError:
+            logging.warning("Sampler %d timed out waiting for prompt", sampler.sampler_id)
+            continue
+        except Exception as e:
+            logging.error("Sampler %d failed to get prompt: %s", sampler.sampler_id, str(e))
+            continue
+        
         await sampler.sample(prompt, eval_queue)
         
         # Exponential backoff based on queue size
@@ -140,6 +150,7 @@ async def sampler_worker(sampler: sampler.Sampler, eval_queue: multiprocessing.Q
             current_sleep = base_sleep
             
         await asyncio.sleep(current_sleep)
+        #logging.info(f"Async Sampler {sampler.sampler_id} finished working")
 
 def countdown_timer(seconds,team=None):
     """Display a countdown timer."""
@@ -173,7 +184,7 @@ def select_wandb_entity(team=None):
         logging.warning(f"Error in entity selection: {e}")
         return None  # Default to no entity on error
 
-async def validate_model(lm: sampler.LLM, timeout=30):
+async def validate_model(lm: sampler.LLM, timeout=90):
     """Test if the model is responding correctly with timeout.
     
     Args:
@@ -181,7 +192,7 @@ async def validate_model(lm: sampler.LLM, timeout=30):
         timeout: Maximum time in seconds to wait for response (default: 30)
     """
     try:
-        test_prompt = "Write a simple Python function that adds two numbers."
+        test_prompt = "Write a simple lean 4 proof for addition commutativity"
         
         # Create task with timeout
         try:
@@ -226,7 +237,8 @@ async def validate_all_models(lm_list):
     
     if len(valid_models) < len(lm_list):
         print(f"\nWarning: Only {len(valid_models)}/{len(lm_list)} models passed validation")
-        response = input("Continue with valid models? (Y/n): ").strip().lower()
+        #response = input("Continue with valid models? (Y/n): ").strip().lower()
+        response = 'y'
         if response == 'n':
             raise RuntimeError("User chose to abort due to model validation failures")
     
@@ -246,7 +258,8 @@ async def run_agents(config: config_lib.Config, database: AsyncProgramsDatabase,
     # Validate models before starting
     valid_lm = await validate_all_models(portable_config.lm)
     if len(valid_lm) != len(portable_config.lm):
-        config.num_samplers = len(valid_lm)
+        #config.num_samplers = len(valid_lm)
+        object.__setattr__(config, 'num_samplers', len(valid_lm))
         logging.info(f"Adjusted number of samplers to {config.num_samplers} based on valid models")
     portable_config.lm = valid_lm
 
@@ -331,6 +344,8 @@ async def run_agents(config: config_lib.Config, database: AsyncProgramsDatabase,
             if not wandb.run:
                 logging.info("Wandb run stopped externally. Initiating graceful shutdown.")
                 break
+
+            best_score_overall = -np.inf
 
             current_time = time.time() - start_time
             if current_time >= logging_info_interval * (current_time // logging_info_interval):
@@ -434,6 +449,9 @@ async def run_agents(config: config_lib.Config, database: AsyncProgramsDatabase,
             if result_queue.qsize() > 50:
                 logging.warning("Result queue size exceeded 50. Initiating shutdown. Note this may take a few minutes to complete!")
                 break
+            if best_score_overall >= 100:
+                logging.warning(f"Best score exceeded 100 before program count {database.orig_database._program_counter}. Initiating shutdown. Note this may take a few minutes to complete!")
+                break
     except asyncio.CancelledError:
         logging.info("Cancellation requested. Shutting down gracefully. Note this may take a few minutes to complete!")
     finally:
@@ -446,8 +464,8 @@ async def run_agents(config: config_lib.Config, database: AsyncProgramsDatabase,
         # Signal processes to shut down
         for _ in evaluator_processes:
             eval_queue.put(None)
-        evaluator_shutdown_timeout = 60
-        database_shutdown_timeout = 30
+        evaluator_shutdown_timeout = 20
+        database_shutdown_timeout = 20
         logging.info("All evaluator workers requested to shut down - waiting %d seconds for them to finish", evaluator_shutdown_timeout)
         # Wait up to 60 seconds total for all evaluator processes to finish
         start_time = time.time()

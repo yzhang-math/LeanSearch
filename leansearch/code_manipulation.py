@@ -246,15 +246,17 @@ class ProgramVisitor(ast.NodeVisitor):
 def function_match(implementation: str) -> Function:
   theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
   theorem\s+                             # Theorem keyword
-  (\w+?)                                  # Base name
+  ([\w_]+?)                               # Base name
+  (?=(?:_v\d+)?\s)                      # Lookahead for version number
   (?:_v(\d+))?                           # Optional version number
   \s*
-  ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
+  (.*?)                               # All parameters
   \s*:\s*                                # Statement separator
   ((?:(?!:=).)*?)                        # Statement
   \s*(:=\s*(?:by\s*)?)                  # Proof separator
   ([\s\S]*)
   '''
+  #logging.info(f"function_match: implementation:\n{implementation}")
   theorem_match = re.search(theorem_pattern, implementation, re.DOTALL | re.VERBOSE)
   if theorem_match:
     name, version, args, return_type, proof_sep,proof = theorem_match.groups()
@@ -262,6 +264,7 @@ def function_match(implementation: str) -> Function:
     theorem_name = f"{name}_v{version}" if version else name
             #proof = proof.strip()
     statement_block = implementation[:theorem_match.end(5)]
+    #logging.info(f"text_to_program detected statement:\n{statement_block}")
     function = Function(
        name=theorem_name,
        args=args.strip() if args else "",
@@ -271,15 +274,17 @@ def function_match(implementation: str) -> Function:
        fullstring=implementation,
        statement_block= statement_block
        )
+    #logging.info(f"function_match:\nname={function.name}\nargs={function.args}\nreturn_type={function.return_type}\nbody={function.body}")
     return function
   else:
+    #logging.warning('Failed to match any theorem pattern in text')
     return None
    
 
 
 def text_to_program(text: str) -> Program:
     """Converts text into a Program object."""
-    # logging.info(f"text_to_program: text:\n{text}")
+    #logging.info(f"text_to_program: text:\n{text}")
     # Check if it's Lean code
     is_lean = True
     if is_lean:
@@ -330,10 +335,10 @@ def text_to_program(text: str) -> Program:
                             statement_block = statement_block
                         ))
                         
-                        #logging.info(f"text_to_program detected statement:\n{statement_block}")
-                        #logging.info(f"text_to_program detected proof:\n{proof}")
+                        
         
         if program.functions:
+                
             return program
             
         logging.warning('Failed to match any theorem pattern in text')
@@ -397,7 +402,7 @@ def _yield_token_and_is_call(
     if prev_token:
       yield prev_token, False
   except Exception as e:
-    logging.warning('Failed parsing %s', code)
+    #logging.warning('Failed parsing %s', code)
     raise e
 
 
@@ -405,6 +410,10 @@ def rename_function_calls(code: str, source_name: str, target_name: str) -> str:
   """Renames function calls from `source_name` to `target_name`."""
   if source_name not in code:
     return code
+  elif len(re.findall(source_name, code)) == 1:
+    return code.replace(source_name, target_name)
+  else:
+     return code
   modified_tokens = []
   for token, is_call in _yield_token_and_is_call(code):
     if is_call and token.string == source_name:

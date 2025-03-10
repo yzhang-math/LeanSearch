@@ -35,7 +35,7 @@ import logging_stats
 """
 #METHOD_MATCHER = re.compile(r"def priority_v\d\(.*?\) -> float:(?:\s*(?:[ \t]*(?!def|#|`|').*(?:\n|$)))+")
 # DDED ANY TYPE SIGNATURE OUTPUT, NOT JUST FLOAT
-METHOD_MATCHER0 = re.compile(r"(?:--@funsearch\.(?:evolve|run)\s*\n)?\s*theorem.*?(?=\s*(?:--@funsearch|theorem)|\s*$)", re.DOTALL)
+#METHOD_MATCHER0 = re.compile(r"(?:--@funsearch\.(?:evolve|run)\s*\n)?\s*theorem.*?(?=\s*(?:--@funsearch|theorem)|\s*$)", re.DOTALL)
 
 METHOD_MATCHER = re.compile(
     r"""(?:--@funsearch\.(?:evolve|run)\s*\n)?  # Optional funsearch header
@@ -43,14 +43,16 @@ METHOD_MATCHER = re.compile(
         \w+(?:_v\d+)?                           # name with optional version
         (?:\s*(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))*)  # type params, instances, args
         [^\n]*:                                 # line containing :
-        [\s\S]*?:=\s*by                        # anything until := by
+        [\s\S]*?:=(?:\s*by)?                     # anything until := by
         [\s\S]*?                               # proof
         (?=\s*(?:--@funsearch|theorem)|\s*$)   # until next theorem or end
     """,
     re.VERBOSE | re.DOTALL
 )
 
-METHOD_NAME_MATCHER = re.compile(r"theorem\s+([a-zA-Z]\w*)(?:_v\d+)?")
+#METHOD_NAME_MATCHER = re.compile(r"theorem\s+([a-zA-Z]\w*)(?:_v\d+)?")
+
+METHOD_NAME_MATCHER = re.compile(r"theorem\s+([\w][\w']*)(?:_v\d+)?")
 
 ALLOWED_FUNCTIONS = {'itertools', 'numpy', 'np', 'math', 'functools', 'collections', 'random'}
 ALLOWED_FUNCTIONS = {'itertools', 'numpy', 'np', 'math', 'functools', 'collections', 'random'}
@@ -140,8 +142,10 @@ def _find_method_implementation(generated_code: str) -> Tuple[str, str]:
     #logging.info(f"_find_method_implementation found {len(matches)} matches")
     if not matches:
         return "", ""
-    
     last_match = matches[-1].group()  # Get the full match
+    namematch = METHOD_NAME_MATCHER.search(last_match)
+    if not namematch:
+       return "", ""
     name = METHOD_NAME_MATCHER.search(last_match).group()
     return last_match, name
 
@@ -204,7 +208,7 @@ def _sample_to_program(
     # Find the last theorem implementation in the sample
     implementation, name = _find_method_implementation(sample)
     if not implementation:
-        logging.warning(f"No implementation: Failed to parse theorem: {sample}")
+        logging.warning(f"No implementation: Failed to parse theorem: \n{sample[0:min(100, len(sample))]}")
         return None, None
     #logging.info(f"_sample_to_program: Parsing theorem: {implementation}")
     # Create a Function object to represent the theorem
@@ -263,10 +267,11 @@ def _sample_to_program(
 def function_match(implementation: str) -> code_manipulation.Function:
   theorem_pattern = r'''(?:--@funsearch\.evolve\s*(?:\n\s*)?)?  # Optional funsearch header
   theorem\s+                             # Theorem keyword
-  (\w+?)                                  # Base name
+  ([\w_]+?)                               # Base name
+  (?=(?:_v\d+)?\s)                      # Lookahead for version number
   (?:_v(\d+))?                           # Optional version number
   \s*
-  ((?:(?:\{[^}]*\}|\[[^\]]*\]|\([^)]*\))\s*)*) # All parameters
+  (.*?)                               # All parameters
   \s*:\s*                                # Statement separator
   ((?:(?!:=).)*?)                        # Statement
   \s*(:=\s*(?:by\s*)?)                  # Proof separator
@@ -279,6 +284,7 @@ def function_match(implementation: str) -> code_manipulation.Function:
     theorem_name = f"{name}_v{version}" if version else name
             #proof = proof.strip()
     statement_block = implementation[:theorem_match.end(5)]
+    #logging.info(f"sample_to_program statement: \n{statement_block}")
     function = code_manipulation.Function(
        name=theorem_name,
        args=args.strip() if args else "",
@@ -390,14 +396,17 @@ class Evaluator:
       #print("Putting in queue inside evaluator")
       #self._database.register_program(new_function, island_id, scores_per_test)
       #db_queue.put((new_function, island_id, scores_per_test))
-      tempstring = new_function.statement_block.strip() +lean_message + '\n' 
-      if time.time() % 1 < 0.1:
-        logging.info(f"eval:success {lean_message} \nat tactic {scores_per_test[current_input]+1} ")
+      tempstring = new_function.statement_block.strip() +lean_message + '\n\n' 
+      if time.time() % 1 < 0.05:
+        logging.info(f"eval:success {tempstring}")
+        pass
       new_function.fullstring = tempstring
       #logging.debug(f"eval:success {model} {scores_per_test}")
       usage_stats.eval_state = 'success'
       usage_stats.scores_per_test = scores_per_test
       self._log(usage_stats)
+      if scores_per_test[current_input] == 100:
+         logging.info(f'Completed proof found: \n{tempstring}')
       return (new_function, scores_per_test,  usage_stats)
     else:
       logging.info(f"eval:didnotrun: {model}, island_id: {island_id}, file:s{usage_stats.sampler_id}p{usage_stats.prompt_count}e{self._id}c{usage_stats.sandbox_current_call_count} version_gen: {version_generated}, island_version: {island_version}")

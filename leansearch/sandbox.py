@@ -6,6 +6,7 @@ import pathlib
 import sys
 from typing import Any
 import lean_dojo
+import re
 
 import cloudpickle
 
@@ -63,9 +64,8 @@ class ExternalProcessSandbox(DummySandbox):
   funsearch algorithm. It might be easier to set up and thus nice environment to tune the prompts and other code.
   """
 
-  def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", id: int = 0, theorem_path: str = "Mathlib/Algebra/BigOperators/Pi.lean", theorem_name: str = "pi_eq_sum_univ"):
+  def __init__(self, base_path: pathlib.Path, timeout_secs: int = 30, python_path: str = "python", id: int = 0, theorem_setup = ["Mathlib/Algebra/BigOperators/Pi.lean", "pi_eq_sum_univ"]):
     super(ExternalProcessSandbox, self).__init__()
-
     self.id = id
     self.output_path = pathlib.Path(base_path) / f"sandbox{self.id}"
     self.timeout_secs = timeout_secs
@@ -77,7 +77,7 @@ class ExternalProcessSandbox(DummySandbox):
       if not p.exists():
         p.mkdir(parents=True)
     
-    logging.info(f"Initializing sandbox {self.id} with theorem {theorem_name} from {theorem_path}")
+    logging.info(f"Initializing sandbox {self.id} with theorem {theorem_setup}")
     self.repo = None
     self.theorem = None
     self.theorem_path = None
@@ -86,11 +86,13 @@ class ExternalProcessSandbox(DummySandbox):
     #   "https://github.com/leanprover-community/mathlib4",
     #   "29dcec074de168ac2bf835a77ef68bbe069194c5"
     #   )
-    self.repo = lean_dojo.LeanGitRepo.from_path("/home/paul/Desktop/ML_experiments/lean4-example_0")
+    self.repo = lean_dojo.LeanGitRepo.from_path("/home/paul/Desktop/ML_experiments/lean4-example_1")
         #print(self.repo)
         #traced_repo = lean_dojo.trace(self.repo)
-    self.theorem_path = "Lean4Example.lean"
-    self.theorem_name = "amc12a_2015_p10"
+    #self.theorem_path = "Lean4Example.lean"
+    self.theorem_path = theorem_setup[0]
+    #self.theorem_name = "amc12a_2015_p10"
+    self.theorem_name = theorem_setup[1]
     self.theorem = lean_dojo.Theorem(self.repo, self.theorem_path, self.theorem_name)
     
     #self.theorem_path = theorem_path
@@ -163,19 +165,26 @@ class ExternalProcessSandbox(DummySandbox):
       return 100, True, "Proof completed successfully"  # Or some other scoring scheme
     
     feedbackmsg = ''
+    
     try:
       with lean_dojo.Dojo(entry=self.theorem, timeout=timeout_seconds) as (dojo, state):
         #logging.info(f"Sandbox: {self.id} Parsing tactics from proof:\n {function_to_run}")
         tactics = parse_lean_tactics(function_to_run)
+        if not tactics:
+          return -1, False, "No tactics to evaluate"
+        
         #logging.info(f"Sandbox: {self.id} Evaluating Tactics: {tactics}")
 
         # Return 0, True, "Skip Lean Dojo"
         # Run each tactic
         ran_tactics = ''
+        result = None
+        succ_tac = 0
         for tactic in tactics:
             #logging.info(f"Sandbox: {self.id} Running tactic: \n{tactic}")
             ran_tactics += '\n' + tactic
             result = dojo.run_tac(state, tactic.strip())
+            
             if isinstance(result, lean_dojo.LeanError):
                 #logging.info(f"Sandbox: {self.id} Tactic error\n {result.error} at tactic {tactic}")
 
@@ -186,9 +195,10 @@ class ExternalProcessSandbox(DummySandbox):
             elif isinstance(result, lean_dojo.ProofFinished):
                 logging.info(f"Sandbox: {self.id} Proof completed")
                 return 100, True, ran_tactics+"\n<Lean4 feedback> Proof completed"
-            if "sorry" not in tactic:
-              score += 1
+            if "sorry" not in tactic and score < 9.2:
+                score += 4/(1+succ_tac)
             state = result
+            succ_tac += 1
             
         feedbackmsg = ran_tactics + "\n<Lean4 feedback> Proof unfinished without error\n" + result.pp
             
@@ -217,10 +227,11 @@ def validate_tactic(tactic: str) -> str:
     if not tactic:
       return None
     valid_tactics = ['sorry', 'rw', 'simp', 'intro', 'exact', 'apply', 'split', 'cases', 'induction', 'destruct', 'revert', 'have', 'ext', 'calc']
+    invalid_words = ['begin', 'end', '{']
     cleaned_str = tactic.strip().replace('[', ' [')
     startingword = cleaned_str.split(' ')[0]
-    if startingword not in valid_tactics:
-      pass
+    if startingword in invalid_words:
+       return tactic.split(startingword)[0]
     if "--" in tactic:
       return tactic.split('--')[0]
     else:
@@ -245,11 +256,14 @@ def parse_lean_tactics1(self, proof: str) -> list[str]:
 def parse_lean_tactics(proof: str) -> list[str]:
     """Parse a Lean proof into individual tactics, handling multi-line indented blocks and removing comments."""
     # Remove 'by' if present
-    #logging.info(f"Parsing tactics from proof:\n{proof}")
+    # logging.info(f"Parsing tactics from proof:\n{proof}")
     if proof.startswith('by'):
         proof = proof[2:]
+
+    # Remove multi-line comments /- ... -/ using regex
+    cleaned_proof = re.sub(r'/\-[\s\S]*?\-/', '', proof)
     
-    lines = proof.split('\n')
+    lines = cleaned_proof.split('\n')
     tactics = []
     current_tactic = ""
     current_indent = -1
@@ -263,14 +277,26 @@ def parse_lean_tactics(proof: str) -> list[str]:
             line = line.split("--")[0].rstrip()
             if not line.strip():
                 continue  # Skip lines that were only comments
+
         
         # Calculate line's indentation level
         indent_level = len(line) - len(line.lstrip())
+        first_char = line.lstrip()[0]
 
         if current_indent == -1:
            current_indent = indent_level
-        
-        if indent_level <= current_indent:
+
+        if  indent_level > current_indent:
+          validated_tactic = validate_tactic(line)
+          if validated_tactic.strip():
+             current_tactic += "\n" + validated_tactic
+          # This is a continuation of the current tactic (indented block)
+        elif indent_level == current_indent and first_char in '·|{':
+          validated_tactic = validate_tactic(line)
+          if validated_tactic.strip():
+             current_tactic += "\n" + validated_tactic
+          # continuation of case tactics
+        else:
             # If we have a stored tactic, validate and save it first
             if current_tactic:
                 # validated_tactic = validate_tactic(current_tactic.strip())
@@ -283,11 +309,9 @@ def parse_lean_tactics(proof: str) -> list[str]:
             if validated_tactic.strip():
               current_tactic = validated_tactic
               current_indent = indent_level
-        else:
-            # This is a continuation of the current tactic (indented block)
-            validated_tactic = validate_tactic(line)
-            if validated_tactic.strip():
-                current_tactic += "\n" + validated_tactic
+
+            
+            
 
     
     # Don't forget to process the last tactic

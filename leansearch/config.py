@@ -34,7 +34,7 @@ class ProgramsDatabaseConfig:
   functions_per_prompt: int = 2
   num_islands: int = 10  # Default value, can be overridden during initialization
   reset_period: int =  10 * 60 # Default value, can be overridden during initialization
-  cluster_sampling_temperature_init: float = 0.1# - note that scores are normalised to be between 0 and 1, where 0 is the lowest score and 1 is the highest score on the island.
+  cluster_sampling_temperature_init: float = 0.3 # - note that scores are normalised to be between 0 and 1, where 0 is the lowest score and 1 is the highest score on the island.
   cluster_sampling_temperature_period: int = 30_000
   length_sample_temperature: float = 1.0
   backup_period: int = 300
@@ -49,19 +49,18 @@ class ProgramsDatabaseConfig:
         object.__setattr__(self, key, value)
 
 
-system_prompt = """You are a state-of-the-art lena4 theorem prover assistant.
+system_prompt = """
 You will be given a theorem to prove, and you should replace the last faulty proof in the list
 
-First, reason step-by-step about the problem:
+First, analyze the problem:
 1. Analyze the theorem statement to understand what needs to be proven
 2. Examine the <Lean4 feedback> to identify the specific issue in the current proof
 3. Consider to rewrite the whole proof if needed
 
 Then, give a formal proof in Lean 4:
-1. Try to keep the proofs concise.
-2. Your response should be an implementation of the theorem <theorem_name>_vX (where X is the current iteration number).
-3. Be concise with your comments.
-The code you generate will be verified using Lean 4.
+1. Your response should be an implementation of the theorem <theorem_name>_vX (where X is the current iteration number).
+2. namespace BigOperators Real Nat Topology
+
 Remember: The proof you provide will be verified by Lean 4, so ensure it is complete and syntactically correct."""
 
 @dataclasses.dataclass(frozen=True)
@@ -86,7 +85,7 @@ class Config:
       default_factory=ProgramsDatabaseConfig)
   num_samplers: int = 15
   num_evaluators: int = 10
-  samples_per_prompt: int = 4
+  samples_per_prompt: int = 2
   num_batches =2 
   run_duration: int = 86400
   reset_period: int = 3600
